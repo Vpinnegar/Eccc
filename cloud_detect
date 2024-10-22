@@ -1,0 +1,327 @@
+"""
+Created on Fri Jun 14 23:53:20 2024
+
+@author: starv
+"""
+
+''' Cloud detection: 2 parts
+
+Part One: Threshold mechanism 
+    Above certain threshold ping value. 
+    
+    
+    
+    Change Log:
+        1.0 Mask value is set April,2024
+        1.1 Threshold at 8 * the average beta_atten
+
+
+
+Part two: Gradient mechanisim 
+Above certain threshold + taking th egradient of the graph after smoothing
+
+
+Part 3: System verification with Vaisala product
+
+
+
+Function: Inputs(Machine,file, model)
+
+Mahine = CL61, CL51
+file = ....nc
+
+model = yes/no
+
+
+
+'''
+### Imports
+import os
+import matplotlib.pyplot as plt
+from matplotlib import pyplot as plt # import libraries
+import pandas as pd # import libraries
+import netCDF4 as nc # import libraries
+import numpy as np
+from matplotlib import cm, ticker
+from numpy import ma
+import matplotlib.style as mplstyle
+import matplotlib
+from matplotlib import colors
+import scipy
+
+import os
+import re
+from datetime import datetime, timedelta
+
+def get_file_name(file_path):
+    return os.path.basename(file_path)
+
+def extract_end_time(file_name, time_format='%Y%m%d_%H%M%S'):
+    # Adjust the regular expression to match the new time format 'YYYYMMDD_HHMMSS'
+    match = re.search(r'\d{8}_\d{6}', file_name)
+    if match:
+        end_time_str = match.group()
+        end_time = datetime.strptime(end_time_str, time_format)
+        return end_time
+    else:
+        raise ValueError("No valid end time found in file name")
+
+def generate_hourly_ticks(end_time, duration_hours=6):
+    # Calculate the start time based on the end time and duration
+    start_time = end_time - timedelta(hours=duration_hours)
+    ticks = [start_time + timedelta(hours=i) for i in range(duration_hours + 1)]
+    return ticks
+m = 5
+def calculate_snr_profiles(data):
+    num_profiles = data.shape[0]
+    num_samples = data.shape[1]
+    
+    snr_profiles = np.zeros((num_profiles, num_samples))
+    
+    for i in range(num_profiles):
+        # Compute indices for the ten profiles
+        start_index = max(0, i - 5)
+        end_index = min(num_profiles, i + 5)
+        
+        top = np.mean(bScatatt[start_index:end_index,:], axis=0)
+        ten_profiles = (bScatatt[start_index:end_index,:] - top)**2
+        # Average the ten profiles
+        avg_ten_profiles = np.sum(ten_profiles, axis=0)
+        
+        # Compute the profile divided by the square root of the averaged values of ten profiles
+        profile_divided_by_sqrt_avg_ten_profiles = top / np.sqrt((1/(2*m))*(avg_ten_profiles))
+        
+        # Compute the square of the original profile
+        # profile_squared = data[i] ** 2
+        
+        # Subtract the squared original profile from the result obtained above
+        # result = profile_divided_by_sqrt_avg_ten_profiles - profile_squared
+        
+        # Take the mean of the result
+        # mean_result = np.mean(result)
+        
+        # Calculate SNR
+        snr_profiles[i] = profile_divided_by_sqrt_avg_ten_profiles
+        
+    return snr_profiles
+window = 20
+
+
+
+
+
+
+
+
+
+
+directory = "C:/Users/starv/OneDrive/Desktop/Code/CL61-2024/Cl61/"
+
+files = [f for f in os.listdir(directory) if f.endswith('.nc')] 
+
+
+## 32,33,34 is not there
+current_file = 'EastgateCL61_20240102_220255.nc'
+
+nfile = nc.Dataset(directory + current_file)
+
+file_name = get_file_name(directory + current_file)
+end_time = extract_end_time(file_name)
+print(f"End time extracted from file name: {end_time}")
+        
+hourly_ticks = generate_hourly_ticks(end_time)
+time_components = [tick.time() for tick in hourly_ticks]
+backspol = nfile['p_pol'][:]
+backsxpol = nfile['x_pol'][:]
+bScatatt= nfile['beta_att'][:]
+bScatatt1= nfile['beta_att'][:]
+clouds = nfile['sky_condition_cloud_layer_heights'][:]
+
+
+### PLot current file
+tim = np.linspace(0,360,360)
+levels = np.linspace(start = 0.0000001, stop = 0.00008, num = 500)
+fig, ax = plt.subplots(figsize=(10,4))    
+plt.yticks([0,1000,2000,3000],['0','5','10','15'])
+plt.xticks([0,60,120,180,240,300,360],time_components)
+plt.ylabel("Altitude (Km)")
+# plt.contourf(np.ndarray.transpose(bScatatt),levels, locator=ticker.LogLocator(), cmap= 'turbo')
+plt.title(current_file)
+cs = ax.contourf(np.ndarray.transpose(bScatatt),levels, locator=ticker.LogLocator(), cmap= 'turbo')
+cbar = fig.colorbar(cs)
+plt.scatter(tim,clouds[:,0]/5, color = 'black', marker = 'x', label = 'Vaisala Cloud')
+plt.legend()
+plt.xlabel('Time (UTC)')
+plt.savefig("C:/Users/starv/OneDrive/Desktop/VictoriaPhD/" + current_file + ".png", dpi=800)
+plt.show()
+
+
+
+
+##### Test section for producing array
+array_shape = bScatatt.shape
+new_array = np.zeros(array_shape)
+
+#### Test section for threshold 
+
+
+### Mask test
+tal = calculate_snr_profiles(bScatatt)
+mask1 = tal < 1
+# bScatatt[mask1] = np.nan
+
+
+
+# Step 2: Identify positions with y-index above 2000
+y_threshold = 2000
+
+# Step 3: Set non-zero values at these positions to np.nan
+# We need to iterate over the array and apply the condition
+
+# Create a boolean mask where y-index is above 2000
+y_indices_above_threshold = np.arange(bScatatt.shape[1]) > y_threshold
+
+# Apply the condition
+
+threshold = 0.00001
+maskthres = bScatatt >= threshold
+
+masked_array = np.where(maskthres, bScatatt, np.nan)
+masked_array[:, 2000:3275][masked_array[:, 2000:3275] != np.nan] = np.nan
+masked_array[mask1] = np.nan
+
+tim = np.linspace(0,360,360)
+levels = np.linspace(start = 0.00001, stop = 0.0008, num = 500)
+fig, ax = plt.subplots(figsize=(10,4))    
+plt.yticks([0,1000,2000,3000],['0','5','10','15'])
+plt.xticks([0,60,120,180,240,300,360],time_components)
+plt.ylabel("Altitude (Km)")
+# plt.contourf(np.ndarray.transpose(bScatatt),levels, locator=ticker.LogLocator(), cmap= 'turbo')
+plt.title(current_file)
+cs = ax.contourf(np.ndarray.transpose(masked_array),levels , cmap= 'turbo')
+cbar = fig.colorbar(cs)
+# plt.scatter(tim,clouds[:,0]/5, color = 'black', marker = 'x', label = 'Vaisala Cloud')
+# plt.legend()
+plt.xlabel('Time (UTC)')
+levels1 = np.linspace(start = 0, stop = 5, num = 100)
+fig, ax = plt.subplots(figsize=(10,4))    
+plt.yticks([0,1000,2000,3000],['0','5','10','15'])
+plt.xticks([0,60,120,180,240,300,360],time_components)
+plt.ylabel("Altitude (Km)")
+# plt.contourf(np.ndarray.transpose(bScatatt),levels, locator=ticker.LogLocator(), cmap= 'turbo')
+plt.title(current_file)
+cs = ax.contourf(np.ndarray.transpose(tal),levels1 , cmap= 'turbo')
+cbar = fig.colorbar(cs)
+# plt.scatter(tim,clouds[:,0]/5, color = 'black', marker = 'x', label = 'Vaisala Cloud')
+# plt.legend()
+plt.xlabel('Time (UTC)')
+plt.ylim(0,1000)
+
+
+
+
+
+
+
+
+
+Cloud = []
+### 
+# bScatatt[mask2] = 0
+# bScatatt[mask1] = 0
+for row in bScatatt:
+    if np.any(row) > 0.00001: 
+        for bg in range(len(row)):
+            clo = []
+            
+            if row[bg] > 0.00001:
+                print('yes')
+                clo.append(bg)
+                
+                break
+        if len(clo)==0:
+            Cloud.append(np.nan)
+            print('please')
+        else:
+            Cloud.append(clo[0])
+        
+        
+        # print(1)
+        
+    else:
+        Cloud.append(np.nan)
+        # print('please')
+
+
+
+# import numpy as np
+# import matplotlib.pyplot as plt
+
+# # Step 1: Create a grey contour plot
+# # Generate sample data for the contour plot
+# x = np.linspace(-3.0, 3.0, 100)
+# y = np.linspace(-3.0, 3.0, 100)
+# X, Y = np.meshgrid(x, y)
+# Z = np.sin(X) ** 10 + np.cos(10 + Y * X) * np.cos(X)
+
+# # Step 2: Create a mask/array to highlight a specific feature
+# # Generate a mask where a feature will be highlighted
+# mask = np.zeros_like(Z)
+# mask[Z > 0.5] = 1  # Example condition for the feature
+
+# # Step 3: Plot the contour and overlay the mask
+# plt.figure(figsize=(8, 6))
+
+# # Plot the grey contour plot
+# contour = plt.contourf(X, Y, Z, 20, cmap='Greys', alpha=0.7)
+
+# # Overlay the mask in red
+# plt.imshow(mask, extent=[-3, 3, -3, 3], origin='lower', cmap='Reds', alpha=0.3)
+
+# # Optional: Add a color bar and labels for better visualization
+# plt.colorbar(contour)
+# plt.title('Contour Plot with Highlighted Feature')
+# plt.xlabel('X-axis')
+# plt.ylabel('Y-axis')
+
+# # Show the plot
+# plt.show()
+from matplotlib.colors import LogNorm
+from matplotlib.patches import Patch
+from matplotlib.ticker import LogLocator, LogFormatter
+
+tim = np.linspace(0,360,360)
+levels = np.linspace(start = 0.0000001, stop = 0.00008, num = 500)
+fig, ax = plt.subplots(figsize=(10,4))    
+plt.yticks([0,1000,2000,3000],['0','5','10','15'])
+plt.xticks([0,60,120,180,240,300,360],time_components)
+plt.ylabel("Altitude ($Km$)")
+log_norm = LogNorm(vmin=0.0000001, vmax=0.00008)
+# plt.contourf(np.ndarray.transpose(bScatatt),levels, locator=ticker.LogLocator(), cmap= 'turbo')
+plt.title(current_file)
+cs = ax.contourf(np.ndarray.transpose(bScatatt),levels, norm=log_norm, cmap= 'Purples', alpha = 1)
+contour2 =plt.contourf(np.ndarray.transpose(masked_array), cmap='Reds', alpha=0.7, label = 'Cloud-Threshold')
+# cbar = fig.colorbar(cs)
+cbar = plt.colorbar(cs, ticks=LogLocator(),
+                    format=LogFormatter(labelOnlyBase=False))
+
+# Add label to colorbar
+cbar.set_label(r'Log of $\beta_{att}$ (Log($1/m*sr$))')
+# plt.scatter(tim,clouds[:,0]/5, color = 'black', marker = 'x', label = 'Vaisala Cloud')
+legend_elements = [Patch(facecolor='red', edgecolor='black', label='Cloud-Threshold')]
+plt.ylim(0,1000)
+# Add legend for the second contour plot
+plt.legend(handles=legend_elements, loc='upper right')
+plt.xlabel('Time ($UTC$)')
+# plt.savefig("C:/Users/starv/OneDrive/Desktop/VictoriaPhD/" + current_file + ".png", dpi=800)
+
+plt.savefig("C:/Users/starv/OneDrive/Desktop/VictoriaPhD/cloudhardthreshold" + current_file + ".png", dpi=800)
+plt.show()
+
+
+
+# def Cloud_detection(Mach,file,mod):
+    
+    
+    
+#     return
