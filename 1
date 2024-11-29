@@ -1,0 +1,70 @@
+import os
+import re
+from datetime import datetime
+import numpy as np
+from netCDF4 import Dataset
+
+def combine_variable_from_folder(folder_path, variable_name, target_date):
+    """
+    Combine a specific variable from NetCDF files in a folder matching a specific date.
+
+    Parameters:
+        folder_path (str): Path to the folder containing NetCDF files.
+        variable_name (str): Name of the variable to extract and combine.
+        target_date (str): Date in 'YYYYMMDD' format to filter files.
+
+    Returns:
+        combined_array (numpy.ndarray): Combined array of the variable from all files matching the date.
+        start_time (datetime): Start time of the combined data.
+        end_time (datetime): End time of the combined data.
+    """
+    # Regular expression to extract datetime from filename (assumes format YYYYMMDD_HHMMSS)
+    datetime_pattern = r'STonyPLain_(\d{8}_\d{6})'
+
+    # List to hold matching files
+    matching_files = []
+
+    # Find all files in the folder
+    for file_name in os.listdir(folder_path):
+        if file_name.endswith(".nc"):
+            match = re.search(datetime_pattern, file_name)
+            if match:
+                file_date = match.group(1).split('_')[0]  # Extract YYYYMMDD part
+                if file_date == target_date:
+                    matching_files.append(os.path.join(folder_path, file_name))
+
+    # Check if any files matched the target date
+    if not matching_files:
+        raise ValueError(f"No files found in '{folder_path}' matching the date {target_date}.")
+
+    # Dictionary to store files with their associated datetime
+    file_datetimes = {}
+    for file in matching_files:
+        match = re.search(datetime_pattern, os.path.basename(file))
+        if match:
+            file_datetime = datetime.strptime(match.group(1), "%Y%m%d_%H%M%S")
+            file_datetimes[file] = file_datetime
+
+    # Sort files by datetime
+    sorted_files = sorted(file_datetimes.keys(), key=lambda x: file_datetimes[x])
+
+    # Initialize an empty list to store the data
+    combined_data = []
+
+    # Iterate over sorted files and extract the variable
+    for file in sorted_files:
+        with Dataset(file, 'r') as nc:
+            if variable_name in nc.variables:
+                data = nc.variables[variable_name][:]
+                combined_data.append(data)
+            else:
+                raise KeyError(f"Variable '{variable_name}' not found in file: {file}")
+
+    # Concatenate all data into a single array
+    combined_array = np.concatenate(combined_data, axis=0)
+
+    # Determine the start and end times
+    start_time = file_datetimes[sorted_files[0]]
+    end_time = file_datetimes[sorted_files[-1]]
+
+    return combined_array, start_time, end_time
